@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import main
 
@@ -100,6 +100,51 @@ class ChargeParameterTests(unittest.TestCase):
         unsupported = {**self.device, "measure": 2}
         with self.assertRaises(main.UnsupportedChargeMode):
             main.build_charge_params("device", "1", 500, unsupported)
+
+
+class PublicLogPrivacyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dry_run_does_not_log_balance_device_or_port(self) -> None:
+        now = datetime.now(main.TZ_BEIJING)
+        record = {
+            "endtype": 39,
+            "enddt": timestamp_ms(now.replace(hour=0, minute=0, second=0)),
+            "devaddress": "sensitive-device-123",
+            "devport": "1",
+        }
+        device = {
+            "measure": 1,
+            "ycTime": 480,
+            "devtypeid": 40,
+            "safeCharge": 0,
+            "efee": 100,
+            "eCharge": 50,
+            "serviceCharge": 50,
+            "portstatur": "00",
+        }
+        messages: list[str] = []
+
+        with (
+            patch.object(main, "DRY_RUN", True),
+            patch.object(main, "log", side_effect=messages.append),
+            patch.object(
+                main,
+                "get_user_info",
+                AsyncMock(
+                    return_value={"employeeid": 123456, "readyaccountmoney": 1234}
+                ),
+            ),
+            patch.object(main, "get_charge_log", AsyncMock(return_value=[record])),
+            patch.object(main, "get_device_info", AsyncMock(return_value=device)),
+        ):
+            result, message = await main.try_charge(object())
+
+        combined = "\n".join([*messages, message])
+        self.assertEqual(result, main.ChargeResult.DRY_RUN)
+        self.assertNotIn("12.34", combined)
+        self.assertNotIn("sensitive-device-123", combined)
+        self.assertNotIn("设备=sensitive-device-123", combined)
+        self.assertNotIn("端口=1", combined)
+        self.assertNotIn("端口状态: 00", combined)
 
 
 if __name__ == "__main__":

@@ -258,8 +258,7 @@ def find_power_off_record(
     enddt, record = max(candidates, key=lambda candidate: candidate[0])
     end_time = datetime.fromtimestamp(enddt / 1000, tz=TZ_BEIJING)
     log(
-        f"找到断电记录: 设备={record.get('devaddress')}, "
-        f"端口={record.get('devport')}, "
+        "找到符合条件的断电记录: "
         f"结束时间={end_time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     return record
@@ -285,9 +284,9 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
             )
 
         balance = _as_int(user_info.get("readyaccountmoney", 0), "readyaccountmoney")
-        log(f"当前余额: {balance / 100:.2f} 元")
         if balance < MIN_METER_BALANCE_CENTS:
             return ChargeResult.ERROR, "按电量计费当前至少需要 2 元账户余额"
+        log("账户余额满足按电量计费最低要求")
 
         now = datetime.now(TZ_BEIJING)
         logs: list[dict[str, Any]] = []
@@ -316,12 +315,13 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
         if not devaddress or not port:
             return ChargeResult.ERROR, "断电记录缺少设备或端口信息"
 
-        log(f"获取设备 {devaddress} 信息...")
+        log("获取断电记录对应的设备信息...")
         device_info = await get_device_info(session, devaddress)
         portstatur = str(device_info.get("portstatur") or "")
-        log(f"端口状态: {portstatur}")
-        if not is_port_free(portstatur, port):
-            return ChargeResult.PORT_BUSY, f"端口 {port} 非空闲（可能尚未供电）"
+        port_is_free = is_port_free(portstatur, port)
+        log(f"端口状态检查: {'空闲' if port_is_free else '非空闲'}")
+        if not port_is_free:
+            return ChargeResult.PORT_BUSY, "断电记录对应端口非空闲（可能尚未供电）"
 
         params, duration_minutes = build_charge_params(
             devaddress,
@@ -330,7 +330,7 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
             device_info,
         )
         log(
-            f"续充计划: 设备={devaddress}, 端口={port}, "
+            "续充计划: 使用断电记录中的同一设备和端口, "
             f"最长={duration_minutes} 分钟, 按电量计费, 余额支付"
         )
 
@@ -339,9 +339,7 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
 
         result = await begin_charge(session, params)
         if result.get("success"):
-            return ChargeResult.SUCCESS, (
-                f"设备={devaddress}, 端口={port}, 最长={duration_minutes} 分钟"
-            )
+            return ChargeResult.SUCCESS, f"最长={duration_minutes} 分钟"
         return ChargeResult.ERROR, f"充电启动失败: {result.get('msg') or '未知错误'}"
 
     except (aiohttp.ClientError, asyncio.TimeoutError, ApiError) as exc:
