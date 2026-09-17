@@ -17,12 +17,21 @@ class FindPowerOffRecordTests(unittest.TestCase):
         record = {
             "endtype": "39",
             "enddt": timestamp_ms(
-                datetime(2026, 7, 21, 0, 5, tzinfo=main.TZ_BEIJING)
+                datetime(2026, 7, 21, 0, 15, 41, tzinfo=main.TZ_BEIJING)
             ),
             "devaddress": "device",
             "devport": "11",
         }
         self.assertIs(main.find_power_off_record([record], now=self.now), record)
+
+    def test_rejects_record_after_expanded_window(self) -> None:
+        record = {
+            "endtype": 39,
+            "enddt": timestamp_ms(
+                datetime(2026, 7, 21, 0, 30, 1, tzinfo=main.TZ_BEIJING)
+            ),
+        }
+        self.assertIsNone(main.find_power_off_record([record], now=self.now))
 
     def test_rejects_record_from_previous_day(self) -> None:
         record = {
